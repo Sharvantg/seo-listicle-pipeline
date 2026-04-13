@@ -7,6 +7,8 @@
 import { NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 
+export const dynamic = "force-dynamic"; // never cache this endpoint
+
 type CheckResult = { status: "ok" | "missing" | "error"; detail?: string };
 type Report = Record<string, CheckResult | Record<string, string>>;
 
@@ -73,20 +75,15 @@ export async function GET() {
     report["serper"] = { status: "error", detail: e instanceof Error ? e.message : String(e) };
   }
 
-  // ── MOZ API ───────────────────────────────────────────────────────────────
+  // ── MOZ API (v2 REST — same endpoint as keyword service) ─────────────────
   try {
-    const res = await fetch("https://api.moz.com/jsonrpc", {
+    const res = await fetch("https://lsapi.seomoz.com/v2/keyword_data", {
       method: "POST",
       headers: {
         Authorization: `Basic ${process.env.MOZ_API_KEY}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: "1",
-        method: "data.keyword.difficulty",
-        params: { keyword: "test", locale: "en-US" },
-      }),
+      body: JSON.stringify({ keywords: ["test"], metrics: ["difficulty", "volume"] }),
     });
     const text = await res.text();
     report["moz"] = res.ok
@@ -107,7 +104,7 @@ export async function GET() {
       body: JSON.stringify({
         model: "openai/gpt-4o-mini",
         messages: [{ role: "user", content: 'Reply "ok"' }],
-        max_tokens: 5,
+        max_tokens: 16,
       }),
     });
     const body = await res.text();
