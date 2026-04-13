@@ -59,13 +59,18 @@ export async function GET(
     }
   }
 
-  // When complete: include parsed enriched tool data for the output page
-  log.info("api/pipeline/[runId]", "status check", {
-    runId,
-    status: run.status,
-    enrichmentRunId: run.enrichment_run_id,
+  // DEBUG: embed runtime values directly in response to diagnose missing enrichedTools
+  const _debug = {
+    statusValue: run.status,
+    statusType: typeof run.status,
+    enrichmentRunIdValue: run.enrichment_run_id,
+    enrichmentRunIdType: typeof run.enrichment_run_id,
+    statusIsComplete: run.status === "complete",
+    enrichmentRunIdTruthy: !!run.enrichment_run_id,
     willLoadTools: run.status === "complete" && !!run.enrichment_run_id,
-  });
+  };
+
+  log.info("api/pipeline/[runId]", "status check", { runId, ..._debug });
 
   if (run.status === "complete" && run.enrichment_run_id) {
     const enrichedTools = await loadEnrichedTools(run);
@@ -73,10 +78,10 @@ export async function GET(
       runId,
       enrichedToolCount: enrichedTools.length,
     });
-    return NextResponse.json({ ...data, enrichedTools });
+    return NextResponse.json({ ...data, enrichedTools, _debug });
   }
 
-  return NextResponse.json(data);
+  return NextResponse.json({ ...data, _debug });
 }
 
 /**
