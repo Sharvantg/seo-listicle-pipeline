@@ -20,6 +20,8 @@ import { log } from "@/lib/logger";
 import type { EnrichmentJob, PipelineRun } from "@/lib/supabase";
 import type { ToolCandidate, ToolData } from "@/src/types";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { runId: string } }
@@ -58,8 +60,19 @@ export async function GET(
   }
 
   // When complete: include parsed enriched tool data for the output page
+  log.info("api/pipeline/[runId]", "status check", {
+    runId,
+    status: run.status,
+    enrichmentRunId: run.enrichment_run_id,
+    willLoadTools: run.status === "complete" && !!run.enrichment_run_id,
+  });
+
   if (run.status === "complete" && run.enrichment_run_id) {
     const enrichedTools = await loadEnrichedTools(run);
+    log.info("api/pipeline/[runId]", "enrichedTools result", {
+      runId,
+      enrichedToolCount: enrichedTools.length,
+    });
     return NextResponse.json({ ...data, enrichedTools });
   }
 
@@ -169,11 +182,20 @@ async function checkAndFinalizeEnrichment(
  */
 async function loadEnrichedTools(run: PipelineRun): Promise<ToolData[]> {
   try {
-    const { data: job } = await supabase
+    const { data: job, error: jobError } = await supabase
       .from("enrichment_jobs")
       .select("results, tool_names")
       .eq("run_id", run.enrichment_run_id!)
       .single();
+
+    log.info("api/pipeline/[runId]", "loadEnrichedTools query", {
+      runId: run.run_id,
+      enrichmentRunId: run.enrichment_run_id,
+      hasJob: !!job,
+      hasResults: !!job?.results,
+      jobError: jobError?.message ?? null,
+      resultsLength: Array.isArray(job?.results) ? (job.results as unknown[]).length : null,
+    });
 
     if (!job?.results) return [];
 
@@ -185,7 +207,11 @@ async function loadEnrichedTools(run: PipelineRun): Promise<ToolData[]> {
       approvedTools,
       keyword
     );
-  } catch {
+  } catch (err) {
+    log.error("api/pipeline/[runId]", "loadEnrichedTools exception", {
+      runId: run.run_id,
+      error: err instanceof Error ? err.message : String(err),
+    });
     return [];
   }
 }
