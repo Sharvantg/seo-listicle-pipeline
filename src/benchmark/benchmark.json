@@ -1,0 +1,16 @@
+{
+  "entries": [],
+  "avgWordCount": 2800,
+  "avgFleschScore": 62,
+  "avgToolCount": 10,
+  "avgH2Count": 8,
+  "commonStructure": [
+    "intro with primary keyword",
+    "comparison table",
+    "individual tool sections (H2)",
+    "buying guide / how to choose",
+    "FAQ section",
+    "conclusion with CTA"
+  ],
+  "generatedAt": "placeholder - run npm run benchmark to populate"
+}

@@ -1,0 +1,19 @@
+node_modules/
+dist/
+/output/
+.next/
+
+# Environment — never commit secrets
+.env
+.env.local
+.env.*.local
+
+# Build artifacts
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# OS
+.DS_Store
+
+# Logs
+*.log
