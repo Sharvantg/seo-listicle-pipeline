@@ -7,6 +7,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
+
+export const maxDuration = 60;
 import Anthropic from "@anthropic-ai/sdk";
 import { runKeywordService } from "@/src/services/keyword";
 import { runSerpService } from "@/src/services/serp";
@@ -30,7 +32,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "primaryKeyword is required" }, { status: 400 });
     }
 
-    log.info("api/pipeline", "start", { keyword });
+    log.info("api/pipeline", "start", {
+      keyword,
+      envCheck: {
+        ANTHROPIC_KEY: process.env.ANTHROPIC_KEY ? `set(${process.env.ANTHROPIC_KEY.length}c)` : "MISSING",
+        SERPER_API_KEY: process.env.SERPER_API_KEY ? "set" : "MISSING",
+        MOZ_API_KEY: process.env.MOZ_API_KEY ? `set(${process.env.MOZ_API_KEY.length}c)` : "MISSING",
+        VERCEL_AI_GATEWAY_KEY: process.env.VERCEL_AI_GATEWAY_KEY ? "set" : "MISSING",
+      },
+    });
 
     const query = input.primaryKeyword;
     const runId = randomUUID();
