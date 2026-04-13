@@ -75,20 +75,28 @@ export async function GET() {
     report["serper"] = { status: "error", detail: e instanceof Error ? e.message : String(e) };
   }
 
-  // ── MOZ API (v2 REST — same endpoint as keyword service) ─────────────────
+  // ── MOZ API (JSON-RPC at api.moz.com, x-moz-token auth) ─────────────────
   try {
-    const res = await fetch("https://lsapi.seomoz.com/v2/keyword_data", {
+    const res = await fetch("https://api.moz.com/jsonrpc", {
       method: "POST",
       headers: {
-        Authorization: `Basic ${process.env.MOZ_API_KEY}`,
+        "x-moz-token": process.env.MOZ_API_KEY!,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ keywords: ["test"], metrics: ["difficulty", "volume"] }),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "debug-test-00000000000000000000",
+        method: "data.keyword.metrics.fetch",
+        params: { data: { serp_query: { keyword: "test keyword", locale: "en-US", device: "desktop", engine: "google" } } },
+      }),
     });
-    const text = await res.text();
-    report["moz"] = res.ok
-      ? { status: "ok", detail: `HTTP ${res.status}: ${text.slice(0, 100)}` }
-      : { status: "error", detail: `HTTP ${res.status}: ${text.slice(0, 200)}` };
+    const json = await res.json() as { result?: { keyword_metrics?: { difficulty?: number; volume?: number } }; error?: { message: string } };
+    if (!res.ok || json.error) {
+      report["moz"] = { status: "error", detail: json.error?.message ?? `HTTP ${res.status}` };
+    } else {
+      const m = json.result?.keyword_metrics;
+      report["moz"] = { status: "ok", detail: `difficulty=${m?.difficulty}, volume=${m?.volume}` };
+    }
   } catch (e) {
     report["moz"] = { status: "error", detail: e instanceof Error ? e.message : String(e) };
   }

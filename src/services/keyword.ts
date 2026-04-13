@@ -3,151 +3,109 @@
  * Fetches difficulty, volume, opportunity, intent, and related keywords.
  */
 
+import { randomUUID } from "crypto";
 import type { KeywordResearch } from "../types";
 import { log, elapsed } from "../../lib/logger";
 
 const MOZ_API_KEY = process.env.MOZ_API_KEY!;
-const MOZ_BASE = "https://lsapi.seomoz.com/v2";
+const MOZ_JSONRPC = "https://api.moz.com/jsonrpc";
 
-interface MozKeywordDataResult {
-  keyword: string;
-  difficulty?: number;
-  volume?: number;
-  opportunity?: number;
-}
-
-interface MozKeywordDataResponse {
-  results?: MozKeywordDataResult[];
-}
-
-interface MozKeywordSuggestion {
-  keyword: string;
-  volume?: number;
-  difficulty?: number;
-}
-
-interface MozSuggestionsResponse {
-  keyword_suggestions?: MozKeywordSuggestion[];
+interface MozMetricsResult {
+  keyword_metrics?: {
+    difficulty?: number | null;
+    volume?: number | null;
+    organic_ctr?: number | null;
+    priority?: number | null;
+  };
 }
 
 export async function runKeywordService(primaryKeyword: string): Promise<KeywordResearch> {
   const t = Date.now();
   log.info("keyword-service", "start", { keyword: primaryKeyword });
 
-  const [keywordData, suggestions] = await Promise.all([
-    fetchKeywordData(primaryKeyword),
-    fetchKeywordSuggestions(primaryKeyword),
-  ]);
+  const metrics = await fetchKeywordMetrics(primaryKeyword);
 
-  const result = keywordData?.results?.[0];
-
-  // When MOZ returns no data, use sensible estimates for B2B SaaS listicle keywords
-  // rather than showing 0/0 which looks broken in the UI.
   const fallbackDifficulty = estimateDifficulty(primaryKeyword);
   const fallbackVolume = estimateVolume(primaryKeyword);
 
+  const m = metrics?.keyword_metrics;
   const output: KeywordResearch = {
     primaryKeyword,
-    difficulty: result?.difficulty ?? fallbackDifficulty,
-    volume: result?.volume ?? fallbackVolume,
-    opportunity: result?.opportunity ?? Math.round(100 - fallbackDifficulty * 0.6),
+    difficulty: m?.difficulty ?? fallbackDifficulty,
+    volume: m?.volume ?? fallbackVolume,
+    opportunity: m?.organic_ctr ?? Math.round(100 - fallbackDifficulty * 0.6),
     intent: inferIntent(primaryKeyword),
-    relatedKeywords: (suggestions?.keyword_suggestions ?? [])
-      .slice(0, 10)
-      .map((s) => ({
-        keyword: s.keyword,
-        volume: s.volume ?? 0,
-        difficulty: s.difficulty ?? 0,
-      })),
+    relatedKeywords: [], // suggestions endpoint requires paid tier
   };
 
   log.info("keyword-service", "complete", {
     ms: elapsed(t),
     difficulty: output.difficulty,
     volume: output.volume,
+    organic_ctr: m?.organic_ctr,
     intent: output.intent,
-    relatedKwCount: output.relatedKeywords.length,
-    mozDataMissing: !result,
+    mozDataMissing: !m,
   });
 
   return output;
 }
 
-// Keep the old export name as an alias for backward compatibility during transition
 export { runKeywordService as runKeywordAgent };
 
-async function fetchKeywordData(keyword: string): Promise<MozKeywordDataResponse | null> {
+async function fetchKeywordMetrics(keyword: string): Promise<MozMetricsResult | null> {
   const t = Date.now();
   try {
-    const res = await fetch(`${MOZ_BASE}/keyword_data`, {
+    const res = await fetch(MOZ_JSONRPC, {
       method: "POST",
       headers: {
-        Authorization: `Basic ${MOZ_API_KEY}`,
+        "x-moz-token": MOZ_API_KEY,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        keywords: [keyword],
-        metrics: ["difficulty", "volume", "opportunity"],
+        jsonrpc: "2.0",
+        id: randomUUID(),
+        method: "data.keyword.metrics.fetch",
+        params: {
+          data: {
+            serp_query: {
+              keyword,
+              locale: "en-US",
+              device: "desktop",
+              engine: "google",
+            },
+          },
+        },
       }),
     });
 
     if (!res.ok) {
       const body = await res.text();
-      log.warn("keyword-service", "MOZ keyword_data HTTP error", {
+      log.warn("keyword-service", "MOZ metrics HTTP error", {
         status: res.status,
-        statusText: res.statusText,
         body: body.slice(0, 500),
         ms: elapsed(t),
       });
       return null;
     }
 
-    const data = await res.json() as MozKeywordDataResponse;
-    log.info("keyword-service", "MOZ keyword_data OK", {
-      ms: elapsed(t),
-      resultCount: data.results?.length ?? 0,
-    });
-    return data;
-  } catch (err) {
-    log.error("keyword-service", "MOZ keyword_data exception", {
-      error: err instanceof Error ? err.message : String(err),
-      ms: elapsed(t),
-    });
-    return null;
-  }
-}
+    const data = await res.json() as { result?: MozMetricsResult; error?: { message: string } };
 
-async function fetchKeywordSuggestions(keyword: string): Promise<MozSuggestionsResponse | null> {
-  const t = Date.now();
-  try {
-    const res = await fetch(`${MOZ_BASE}/keyword_suggestions`, {
-      method: "POST",
-      headers: {
-        Authorization: `Basic ${MOZ_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ keyword, limit: 15 }),
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      log.warn("keyword-service", "MOZ keyword_suggestions HTTP error", {
-        status: res.status,
-        statusText: res.statusText,
-        body: body.slice(0, 500),
+    if (data.error) {
+      log.warn("keyword-service", "MOZ metrics JSON-RPC error", {
+        error: data.error.message,
         ms: elapsed(t),
       });
       return null;
     }
 
-    const data = await res.json() as MozSuggestionsResponse;
-    log.info("keyword-service", "MOZ keyword_suggestions OK", {
+    log.info("keyword-service", "MOZ metrics OK", {
       ms: elapsed(t),
-      suggestionCount: data.keyword_suggestions?.length ?? 0,
+      difficulty: data.result?.keyword_metrics?.difficulty,
+      volume: data.result?.keyword_metrics?.volume,
     });
-    return data;
+    return data.result ?? null;
   } catch (err) {
-    log.error("keyword-service", "MOZ keyword_suggestions exception", {
+    log.error("keyword-service", "MOZ metrics exception", {
       error: err instanceof Error ? err.message : String(err),
       ms: elapsed(t),
     });
