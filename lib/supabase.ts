@@ -6,7 +6,15 @@ function getClient(): SupabaseClient {
   if (!_client) {
     _client = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: {
+          // Bypass Next.js data cache for all Supabase queries — we always
+          // need fresh DB reads (especially for status polling).
+          fetch: (url, options) =>
+            fetch(url, { ...options, cache: "no-store" }),
+        },
+      }
     );
   }
   return _client;
